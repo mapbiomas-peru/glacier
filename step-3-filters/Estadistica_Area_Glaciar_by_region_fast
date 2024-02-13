@@ -1,0 +1,186 @@
+var country     = 'COLOMBIA';
+var regionId    = 1003;
+var version     = 55;
+var type        = 'filter';   
+var folder      = 'RAISG-EXPORT';
+
+var years       = [
+  1985, 1986, 1987, 1988, 1989, 1990, 1991, 1992, 1993, 1994, 1995,
+  1996, 1997, 1998, 1999, 2000, 2001, 2002, 2003, 2004, 2005, 2006, 
+  2007, 2008, 2009, 2010, 2011, 2012, 2013, 2014, 2015, 2016, 2017,
+  2018, 2019, 2020, 2021, 2022, 2023
+];
+
+
+/**
+ * Assets paths
+ */
+var commonPath   = 'projects/mapbiomas-raisg';
+
+var regionsPath  = commonPath + '/DATOS_AUXILIARES/RASTERS/clasificacion-regiones-glacier-4';
+
+var mosaicsPath  = 'projects/mapbiomas-raisg/MOSAICOS/mosaics-pathrow-2-co';
+//var mosaicsPath  = commonPath + '/MOSAICOS/mosaics-2';
+
+var classPath    = commonPath + '/COLECCION4/clasificacion';
+
+var filtersPath  = commonPath + '/TRANSVERSALES/COLOMBIA/COLECCION4/GLACIAR/clasificacion-ft';
+
+
+
+/**
+ * Imports
+ */
+var imageId = type === 'classification' ? classPath : filtersPath;
+
+var image   = ee.Image(imageId + '/' + country + '-' + regionId + '-' + version);
+
+var regionRaster  = ee.Image(regionsPath).eq(regionId);
+
+var mosaics = ee.ImageCollection(mosaicsPath);
+
+var palette = require('users/mapbiomas/modules:Palettes.js').get('classification6');
+
+var name_export = "C1-STATS-" + regionId;
+
+
+// display assets
+years.forEach(function(year) {
+  var filtered = mosaics.filterMetadata('year', 'equals', year)
+    .mosaic()
+    .updateMask(regionRaster);
+
+  var yearImage = image.select('classification_' + year);
+
+  
+  Map.addLayer(filtered,
+    {
+      bands: ['swir1_median', 'nir_median', 'red_median'],
+      gain: [0.08, 0.06, 0.2]
+    },
+    'MOSAICO ' + year, false
+  );
+
+  
+  Map.addLayer(yearImage,
+    {
+      min: 0,
+      max: 34,
+      palette: palette
+    },
+    'COL 1 - ' + year.toString(),
+    false
+  );
+});
+
+
+/**
+ * Implementation
+ */
+// compute areas
+getAreas_raster(30,years,regionRaster,image,name_export,'ESTADISTICAS-GLACIAR');
+
+
+/**
+* @description
+*    calculate area
+*/
+
+function getAreas_raster(scale,years,territory,clasifications,name_export,driverFolder){
+
+// LULC mapbiomas image
+var mapbiomas = clasifications.selfMask();
+
+// Image area in km2
+var pixelArea = ee.Image.pixelArea().divide(1000000);
+
+// Geometry to export
+var geometry = mapbiomas.geometry();
+
+/**
+* Convert a complex ob to feature collection
+* @param obj 
+*/
+var convert2table = function (obj) {
+
+    obj = ee.Dictionary(obj);
+
+    var territory = obj.get('territory');
+
+    var classesAndAreas = ee.List(obj.get('groups'));
+
+    var tableRows = classesAndAreas.map(
+        function (classAndArea) {
+            classAndArea = ee.Dictionary(classAndArea);
+
+            var classId = classAndArea.get('class');
+            var area = classAndArea.get('sum');
+
+            var tableColumns = ee.Feature(null)
+                .set('territory', territory)
+                .set('class', classId)
+                .set('area', area);
+
+            return tableColumns;
+        }
+    );
+
+    return ee.FeatureCollection(ee.List(tableRows));
+};
+
+/**
+* Calculate area crossing a cover map (deforestation, mapbiomas)
+* and a region map (states, biomes, municipalites)
+* @param image 
+* @param territory 
+* @param geometry
+*/
+var calculateArea = function (image, territory, geometry) {
+
+    var reducer = ee.Reducer.sum().group(1, 'class').group(1, 'territory');
+
+    var territotiesData = pixelArea.addBands(territory).addBands(image)
+        .reduceRegion({
+            reducer: reducer,
+            geometry: geometry,
+            scale: scale,
+            maxPixels: 1e12
+        });
+
+    territotiesData = ee.List(territotiesData.get('groups'));
+
+    var areas = territotiesData.map(convert2table);
+
+    areas = ee.FeatureCollection(areas).flatten();
+
+    return areas;
+};
+
+var areas = years.map(
+    function (year) {
+        var image = mapbiomas.select('classification_' + year);
+
+        var areas = calculateArea(image, territory, geometry);
+
+        // set additional properties
+        areas = areas.map(
+            function (feature) {
+                return feature.set('year', year);
+            }
+        );
+
+        return areas;
+    }
+);
+
+areas = ee.FeatureCollection(areas).flatten();
+
+Export.table.toDrive({
+    collection: areas,
+    description: 'ESTADISTICAS-'+name_export,  
+    folder: driverFolder,
+    fileNamePrefix: 'ESTADISTICAS-'+name_export,
+    fileFormat: 'CSV'
+});
+
+}

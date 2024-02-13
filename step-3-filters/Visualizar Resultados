@@ -1,0 +1,74 @@
+/**** Start of imports. If edited, may not auto-convert in the playground. ****/
+var geometry = 
+    /* color: #d63000 */
+    /* shown: false */
+    /* displayProperties: [
+      {
+        "type": "rectangle"
+      }
+    ] */
+    ee.Feature(
+        ee.Geometry.Polygon(
+            [[[-88.2194275465692, 12.358143037039117],
+              [-88.2194275465692, -26.29646478186963],
+              [-53.766302546569186, -26.29646478186963],
+              [-53.766302546569186, 12.358143037039117]]], null, false),
+        {
+          "system:index": "0"
+        });
+/***** End of imports. If edited, may not auto-convert in the playground. *****/
+var param = { 
+    year: [2000,2022],  // Solo visualizacion
+    pais: 'PERU',
+    version_input: 45,
+};
+
+
+var dirinput = 'projects/mapbiomas-raisg/TRANSVERSALES/'+ param.pais + '/COLECCION5/GLACIAR/clasificacion-ft';
+var AssetMosaicnexgenmap= 'projects/nexgenmap/MapBiomas2/LANDSAT/PANAMAZON/mosaics-2'
+var AssetMosaicraisg= 'projects/mapbiomas-raisg/MOSAICOS/mosaics-2'
+var prefixo_out = 'AREA-' + param.version_input
+
+var palettes = require('users/mapbiomas/modules:Palettes.js');
+var vis = {
+    'min': 0,
+    'max': 34,
+    'palette': palettes.get('classification2')
+};
+
+var class4FT = ee.ImageCollection(dirinput)
+                      .filterMetadata('version', 'equals', param.version_input)
+                      .mosaic()
+// Map.addLayer(class4FT)
+
+//var mosaicRegion = param.regionGlacier.toString().slice(0, 3);
+var mosaic = ee.ImageCollection(AssetMosaicnexgenmap).merge(AssetMosaicraisg)
+            // .filterMetadata('region_code', 'equals', '703')
+            .select(['swir1_median', 'nir_median', 'red_median']);
+            
+var Clasificacion_TD = ee.ImageCollection(dirinput)
+                      .filterMetadata('version', 'equals', param.version_input)
+                      .mosaic()
+                      
+print(Clasificacion_TD)
+
+//----
+for(var y = 0; y<param.year.length;y++) {
+
+    var vis = {
+        'bands': 'classification_'+param.year[y],
+        'min': 0,
+        'max': 34,
+        'palette': palettes.get('classification2')
+    };
+    
+    Map.addLayer(mosaic.filterMetadata('year', 'equals', param.year[y])
+                      .mosaic(), {
+          'bands': ['swir1_median', 'nir_median', 'red_median'],
+          'gain': [0.08, 0.06, 0.08],
+          'gamma': 0.65
+      }, 'mosaic-'+param.year[y], false);
+    
+    Map.addLayer(Clasificacion_TD, vis, 'Clasificacion-'+param.year[y], false);
+}
+
